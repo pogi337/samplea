@@ -231,10 +231,33 @@ function applyTokens(tokens,reason){
   pick=pick.filter(i=>i<roster.length);
   if(!why)mode='live';
   else if(demo){mode='demo';roster=nums().slice(0,8).map(n=>({n,lv:Math.floor(Math.random()*(MAXLV+1))}))}
-  else{mode='none';roster=[];pick=[];$('#mode').textContent='Arena locked';$('#roster').innerHTML=`<p class="sub">${why}</p><button class="btn alt" id="chk">Check again</button>`;$('#chk').onclick=load;$('#go').classList.add('hide');$('#bot').classList.add('hide');return}
+  else{mode='none';roster=[];pick=[];$('#mode').textContent='Arena locked';$('#roster').innerHTML=`<p class="sub">${why}</p><button class="btn alt" id="chk">Check again</button>${EMB?'':'<button class="btn" id="cw">Connect StarKey wallet</button><p class="sub" id="cwmsg"></p>'}`;$('#chk').onclick=load;if($('#cw'))$('#cw').onclick=connectWallet;$('#go').classList.add('hide');$('#bot').classList.add('hide');return}
   $('#bot').classList.remove('hide');$('#go').classList.toggle('hide',mode!=='live');
   $('#mode').textContent=mode==='live'?'Your Grizzle NFTs':'DEMO roster (practice only, no XP)';
   drawRoster();
+}
+async function connectWallet(){ // standalone test only: the same StarKey sign-in the Grizzle site uses (nonce, signMessage, login)
+  const b=$('#cw'),say=t=>{const s=$('#cwmsg');if(s)s.textContent=t};
+  try{
+    const p=window.starkey&&window.starkey.supra;
+    if(!p){say('StarKey wallet not found. Install StarKey, or open this page in a browser that has it.');return}
+    if(b)b.disabled=true;say('Connecting...');
+    const conn=await p.connect();
+    const accs=Array.isArray(conn)?conn:(conn&&conn.accounts)||await p.account();
+    const first=Array.isArray(accs)?accs[0]:accs;
+    const address=typeof first==='string'?first:first&&first.address;
+    if(!address)throw new Error('No account returned by wallet');
+    const post=async(path,body)=>{const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'server_error');return j};
+    const{nonce,message}=await post('/nonce',{});
+    if(typeof p.signMessage!=='function')throw new Error('This StarKey version does not support signMessage');
+    const hex='0x'+Array.from(new TextEncoder().encode(message),x=>x.toString(16).padStart(2,'0')).join('');
+    const res=await p.signMessage({message:hex,nonce});
+    const signature=res.signature,publicKey=res.publicKey||res.public_key||(first&&first.publicKey);
+    if(!signature||!publicKey)throw new Error('Wallet did not return a signature and public key');
+    const out=await post('/login',{address,publicKey,signature,nonce,fullMessage:message});
+    localStorage.setItem('grizzle_token',out.token);
+    say('Connected. Loading your NFTs...');await loadStandalone();
+  }catch(e){say('Could not connect: '+(e&&e.message||e));if(b)b.disabled=false}
 }
 async function loadStandalone(){
   const tok=localStorage.getItem('grizzle_token');if(!tok)return applyTokens([],'login');
